@@ -45,6 +45,8 @@
       padding-bottom: 20px;
       border-bottom: 1px solid var(--border);
       margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
     }
 
     .title-area h1 {
@@ -119,7 +121,7 @@
       transition: border-color 0.2s;
     }
 
-    input:focus, textarea:focus {
+    input:focus, textarea:focus, select:focus {
       border-color: var(--accent);
     }
 
@@ -134,6 +136,7 @@
       height: 18px;
       cursor: pointer;
       accent-color: var(--accent);
+      flex-shrink: 0;
     }
     .checkbox-group label {
       margin-bottom: 0;
@@ -222,13 +225,16 @@
       display: flex;
       gap: 8px;
     }
-    .log-time { color: var(--text-muted); }
-    .log-level { font-weight: bold; padding: 0 4px; border-radius: 3px; }
+    .log-time { color: var(--text-muted); flex-shrink: 0; }
+    .log-level { font-weight: bold; padding: 0 4px; border-radius: 3px; flex-shrink: 0; }
     .log-level.ALERT { background: rgba(239, 68, 68, 0.3); color: #f87171; }
     .log-level.DEFENSE { background: rgba(249, 115, 22, 0.3); color: #fb923c; }
     .log-level.SUCCESS { background: rgba(34, 197, 94, 0.3); color: #4ade80; }
     .log-level.SECURITY { background: rgba(168, 85, 247, 0.3); color: #c084fc; }
-    .log-level.INFO { color: #38bdf8; }
+    .log-level.RECOVERY { background: rgba(56, 189, 248, 0.25); color: #38bdf8; }
+    .log-level.ERROR { background: rgba(239, 68, 68, 0.4); color: #fca5a5; }
+    .log-level.WARN { background: rgba(245, 158, 11, 0.3); color: #fcd34d; }
+    .log-level.INFO, .log-level.SYSTEM, .log-level.CONFIG, .log-level.BOARD, .log-level.SECTION, .log-level.FIELD, .log-level.NOTIFICATION, .log-level.SYNC, .log-level.MANUAL { color: #38bdf8; }
 
     /* モーダル */
     .modal-overlay {
@@ -259,7 +265,7 @@
       <h2 style="margin-bottom: 16px;">🔐 パスワード認証</h2>
       <div class="form-group">
         <label>管理者パスワード</label>
-        <input type="password" id="loginPassword" placeholder="環境変数 ADMIN_PASSWORD の値">
+        <input type="password" id="loginPassword" placeholder="環境変数 ADMIN_PASSWORD の値" onkeydown="if(event.key==='Enter') submitLogin()">
         <small style="color: var(--text-muted); display: block; margin-top: 5px;">
           ※ 環境変数 <code>ADMIN_PASSWORD</code> で設定したパスワードを入力してください。<br>(未設定時はサーバー起動ログに表示された初期パスワード)
         </small>
@@ -275,7 +281,7 @@
         <h1>🛡️ Padlet 荒らし対策Bot</h1>
         <div style="font-size: 0.85rem; color: var(--text-muted);">Local / Railway 稼働中</div>
       </div>
-      <div style="display: flex; gap: 12px; align-items: center;">
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
         <span id="botStatusBadge" class="status-badge stopped">● 停止中</span>
         <button id="toggleBotBtn" class="btn btn-primary" onclick="toggleBot()">監視開始</button>
         <button class="btn btn-outline" style="border-color: #38bdf8; color: #38bdf8;" onclick="syncPosts()">📥 バックアップ投稿同期</button>
@@ -487,6 +493,16 @@
       exempt: []
     };
 
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     async function init() {
       await fetchStatus();
       setInterval(fetchStatus, 3000); // 3秒ごとにステータスとログを自動同期
@@ -517,12 +533,12 @@
       const toggleBtn = document.getElementById('toggleBotBtn');
       if (data.bot_running) {
         badge.className = 'status-badge running';
-        badge.innerText = '● 監視中 (稼働)';
+        badge.innerText = data.is_restoring ? '● 復元シーケンス実行中' : '● 監視中 (稼働)';
         toggleBtn.className = 'btn btn-danger';
         toggleBtn.innerText = '監視停止';
       } else {
         badge.className = 'status-badge stopped';
-        badge.innerText = '● 停止中';
+        badge.innerText = data.is_restoring ? '● 復元シーケンス実行中' : '● 停止中';
         toggleBtn.className = 'btn btn-primary';
         toggleBtn.innerText = '監視開始';
       }
@@ -545,9 +561,9 @@
         document.getElementById('maxCaptionLength').value = appConfig.max_caption_length ?? appConfig.max_post_length ?? 50;
         document.getElementById('regexPattern').value = appConfig.random_str_pattern || '^.+_[a-zA-Z0-9]{4,}$';
 
-        tagData.admins = appConfig.allowed_admins || [];
-        tagData.mods = appConfig.allowed_moderators || [];
-        tagData.exempt = appConfig.exempt_admins || [];
+        tagData.admins = Array.isArray(appConfig.allowed_admins) ? [...appConfig.allowed_admins] : [];
+        tagData.mods = Array.isArray(appConfig.allowed_moderators) ? [...appConfig.allowed_moderators] : [];
+        tagData.exempt = Array.isArray(appConfig.exempt_admins) ? [...appConfig.exempt_admins] : [];
         renderTags('admins');
         renderTags('mods');
         renderTags('exempt');
@@ -555,6 +571,7 @@
         if (appConfig.main_board && appConfig.main_board.wall_id) {
           renderBoardPreview('main', appConfig.main_board);
           document.getElementById('mainBoardUrl').value = appConfig.main_board.original_url || '';
+          window._lastNotifSecId = appConfig.notification_section_id || null;
           fetchSectionsAndPopulate(appConfig.notification_section_id);
         }
         if (appConfig.backup_board && appConfig.backup_board.wall_id) {
@@ -563,17 +580,31 @@
         }
 
         window._formLoaded = true;
+      } else if (
+        appConfig.main_board &&
+        appConfig.main_board.wall_id &&
+        appConfig.notification_section_id &&
+        String(appConfig.notification_section_id) !== String(window._lastNotifSecId || '')
+      ) {
+        window._lastNotifSecId = appConfig.notification_section_id;
+        fetchSectionsAndPopulate(appConfig.notification_section_id);
       }
 
-      // ログの描画
+      // ログの描画 (XSS完全防止)
       const logContainer = document.getElementById('logContainer');
-      logContainer.innerHTML = (data.logs || []).map(l => `
-        <div class="log-entry">
-          <span class="log-time">[${l.timestamp.split(' ')[1]}]</span>
-          <span class="log-level ${l.level}">${l.level}</span>
-          <span>${l.title} ${l.details ? `(${l.details})` : ''}</span>
-        </div>
-      `).join('');
+      logContainer.innerHTML = (data.logs || []).map(l => {
+        const timePart = (l.timestamp || '').split(' ')[1] || l.timestamp || '';
+        const lvl = escapeHtml(l.level || 'INFO');
+        const title = escapeHtml(l.title || '');
+        const details = l.details ? `(${escapeHtml(l.details)})` : '';
+        return `
+          <div class="log-entry">
+            <span class="log-time">[${escapeHtml(timePart)}]</span>
+            <span class="log-level ${lvl}">${lvl}</span>
+            <span>${title} ${details}</span>
+          </div>
+        `;
+      }).join('');
     }
 
     async function submitLogin() {
@@ -585,7 +616,9 @@
       });
       const data = await res.json();
       if (data.success) {
+        document.getElementById('loginError').innerText = '';
         document.getElementById('loginModal').style.display = 'none';
+        window._formLoaded = false;
         fetchStatus();
       } else {
         document.getElementById('loginError').innerText = data.error || 'ログイン失敗';
@@ -659,6 +692,7 @@
         });
         const data = await res.json();
         if (data.success) {
+          window._lastNotifSecId = data.created.id;
           alert(`通知用セクション『${data.created.title}』を作成し、通知先に設定しました！`);
           populateSectionSelect(data.sections, data.created.id);
         } else {
@@ -670,7 +704,7 @@
     }
 
     async function resolveBoard(type) {
-      const url = document.getElementById(type === 'main' ? 'mainBoardUrl' : 'backupBoardUrl').value;
+      const url = document.getElementById(type === 'main' ? 'mainBoardUrl' : 'backupBoardUrl').value.trim();
       if (!url) {
         alert('URLを入力してください');
         return;
@@ -685,7 +719,9 @@
         renderBoardPreview(type, data.resolved);
         if (type === 'main') {
           if (data.sections) {
-            populateSectionSelect(data.sections, data.config ? data.config.notification_section_id : null);
+            const notifId = data.config ? data.config.notification_section_id : null;
+            window._lastNotifSecId = notifId;
+            populateSectionSelect(data.sections, notifId);
           }
           if (data.custom_key) {
             document.getElementById('customKeyInput').value = data.custom_key;
@@ -694,33 +730,43 @@
             document.getElementById('customValueInput').value = data.custom_value;
           }
           alert(`メインボードを解析しました！\nセクション数: ${(data.sections || []).length}個\n検出投稿フィールド: ${data.custom_key || 'なし'}`);
+        } else {
+          alert(`バックアップボードを解析しました！\nタイトル: ${data.resolved.title}`);
         }
       } else {
-        alert(data.error);
+        alert(data.error || 'ボード解析に失敗しました');
       }
     }
 
     function renderBoardPreview(type, board) {
       const el = document.getElementById(type === 'main' ? 'mainBoardPreview' : 'backupBoardPreview');
+      const title = escapeHtml(board.title || '');
+      const wallId = escapeHtml(board.wall_id || '');
+      const hashId = escapeHtml(board.wall_hashid || '');
+      const bgUrl = board.background_url ? escapeHtml(board.background_url) : '';
       el.innerHTML = `
-        <h4>${board.title}</h4>
-        <div><strong>Wall ID:</strong> ${board.wall_id} | <strong>Hash ID:</strong> ${board.wall_hashid}</div>
-        ${board.background_url ? `<div style="margin-top: 4px;"><img src="${board.background_url}" style="height: 40px; border-radius: 4px; object-fit: cover;"></div>` : ''}
+        <h4>${title}</h4>
+        <div><strong>Wall ID:</strong> ${wallId} | <strong>Hash ID:</strong> ${hashId}</div>
+        ${bgUrl ? `<div style="margin-top: 4px;"><img src="${bgUrl}" style="height: 40px; border-radius: 4px; object-fit: cover;"></div>` : ''}
       `;
     }
 
     async function saveBasicConfig() {
-      const sessionToken = document.getElementById('padletSessionToken').value;
-      const secToken = document.getElementById('padletSecondaryToken').value;
-      const webhook = document.getElementById('discordWebhook').value;
+      const sessionToken = document.getElementById('padletSessionToken').value.trim();
+      const secToken = document.getElementById('padletSecondaryToken').value.trim();
+      const webhook = document.getElementById('discordWebhook').value.trim();
       const notifSelect = document.getElementById('notificationSectionSelect');
       const notifSec = notifSelect ? notifSelect.value : null;
-      const notifTitle = (notifSelect && notifSelect.selectedOptions && notifSelect.selectedOptions[0]) ? notifSelect.selectedOptions[0].getAttribute('data-title') || '' : '';
+      const notifTitle = (notifSelect && notifSelect.selectedOptions && notifSelect.selectedOptions[0] && notifSec)
+        ? (notifSelect.selectedOptions[0].getAttribute('data-title') || '')
+        : '';
       const customKey = document.getElementById('customKeyInput').value.trim();
       const customVal = document.getElementById('customValueInput').value.trim();
-      const interval = parseFloat(document.getElementById('pollInterval').value);
+      const rawInterval = parseFloat(document.getElementById('pollInterval').value);
+      const interval = isNaN(rawInterval) ? 1.0 : Math.max(0.5, rawInterval);
       const visitorRole = document.getElementById('defaultVisitorRole').value;
-      await fetch('/api/config', {
+
+      const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -735,31 +781,60 @@
           default_visitor_role: visitorRole
         })
       });
-      alert('アカウント・通知設定を保存しました');
+      if (res.ok) {
+        window._lastNotifSecId = notifSec || null;
+        alert('アカウント・通知設定を保存しました');
+      } else {
+        alert('設定の保存に失敗しました');
+      }
     }
 
     async function saveDefenseRules() {
-      await fetch('/api/config', {
+      const maxSecs = parseInt(document.getElementById('maxSections').value, 10);
+      const ddos = parseInt(document.getElementById('ddosThreshold').value, 10);
+      const maxCapLen = parseInt(document.getElementById('maxCaptionLength').value, 10);
+      const safeCapLen = isNaN(maxCapLen) ? 50 : Math.max(0, maxCapLen);
+
+      const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          max_sections: parseInt(document.getElementById('maxSections').value, 10),
-          ddos_threshold: parseInt(document.getElementById('ddosThreshold').value, 10),
+          max_sections: isNaN(maxSecs) ? 10 : Math.max(1, maxSecs),
+          ddos_threshold: isNaN(ddos) ? 5 : Math.max(2, ddos),
           delete_non_collaborators: document.getElementById('deleteNonCollab').checked,
           block_duplicates: document.getElementById('blockDuplicates').checked,
           block_image_repeat: document.getElementById('blockImageRepeat').checked,
           block_urls: document.getElementById('blockUrls').checked,
-          max_caption_length: parseInt(document.getElementById('maxCaptionLength').value, 10),
-          max_post_length: parseInt(document.getElementById('maxCaptionLength').value, 10),
+          max_caption_length: safeCapLen,
+          max_post_length: safeCapLen,
           random_str_pattern: document.getElementById('regexPattern').value
         })
       });
-      alert('荒らし対策・DDoSルールを保存しました');
+      if (res.ok) {
+        alert('荒らし対策・DDoSルールを保存しました');
+      } else {
+        alert('ルールの保存に失敗しました');
+      }
+    }
+
+    function commitPendingTagInput(inputId, type) {
+      const el = document.getElementById(inputId);
+      if (!el) return;
+      const val = el.value.trim();
+      if (val && !tagData[type].includes(val)) {
+        tagData[type].push(val);
+        renderTags(type);
+      }
+      el.value = '';
     }
 
     async function saveRoleLists() {
+      commitPendingTagInput('adminTagInput', 'admins');
+      commitPendingTagInput('modTagInput', 'mods');
+      commitPendingTagInput('exemptTagInput', 'exempt');
+
       const visitorRole = document.getElementById('defaultVisitorRole').value;
-      await fetch('/api/config', {
+      const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -769,7 +844,11 @@
           exempt_admins: tagData.exempt
         })
       });
-      alert('全体の権限および権限リストを保存しました');
+      if (res.ok) {
+        alert('全体の権限および権限リストを保存しました');
+      } else {
+        alert('権限設定の保存に失敗しました');
+      }
     }
 
     function renderTags(type) {
@@ -782,7 +861,16 @@
       tagData[type].forEach(val => {
         const span = document.createElement('span');
         span.className = 'tag';
-        span.innerHTML = `${val} <span class="remove" onclick="removeTag('${type}', '${val}')">&times;</span>`;
+        const textNode = document.createTextNode(val + ' ');
+        const removeBtn = document.createElement('span');
+        removeBtn.className = 'remove';
+        removeBtn.textContent = '\u00D7';
+        removeBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          removeTag(type, val);
+        });
+        span.appendChild(textNode);
+        span.appendChild(removeBtn);
         container.insertBefore(span, input);
       });
     }
@@ -810,5 +898,5 @@
 
     window.onload = init;
   </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a48e07511c46d3eb',t:'MTc5MTcyMzQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
